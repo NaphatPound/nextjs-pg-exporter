@@ -1,0 +1,10 @@
+key_a,key_b,extra_inserted_1,key_c,reviewer,new_score,extra_inserted_2,new_grade,new_status
+A001,B001,X1,C001,ผู้ตรวจ A,80,Y1,A,APPROVED
+A002,B002,X2,C002,ผู้ตรวจ A,82,Y2,A,APPROVED
+A003,B003,X3,C003,ผู้ตรวจ B,68,Y3,C,APPROVED
+A004,B004,X4,C004,ผู้ตรวจ B,70,Y4,B,APPROVED
+A005,B005,X5,C005,ผู้ตรวจ C,60,Y5,C,PENDING
+A006,B006,X6,C006,ผู้ตรวจ C,88,Y6,A,APPROVED
+A007,B007,X7,C007,ผู้ตรวจ A,75,Y7,B,APPROVED
+A008,B008,X8,C008,ผู้ตรวจ A,65,Y8,C,APPROVED
+A009,B009,X9,C009,ผู้ตรวจ B,78,Y9,B,APPROVED

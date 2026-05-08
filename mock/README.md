@@ -1,0 +1,77 @@
+# Mock CSV Files - ทดสอบฟีเจอร์ CSV Merge
+
+ไฟล์ทดสอบสำหรับหน้า `/csv-merge` ที่มี **2 Output Modes** แยกกัน:
+- **Replace** — แทนค่าใน File 1 ด้วย File 2 (พฤติกรรมเดิม)
+- **Insert After** — เลือกแค่ key, คอลัมน์ที่เหลือใน File 2 จะ insert ต่อท้าย key column ใน File 1 อัตโนมัติ
+
+## ไฟล์
+
+> ⚠ **กติกาข้อมูล**: คอลัมน์ที่เป็น key ของทั้ง 2 ไฟล์มีค่า**ไม่ซ้ำกัน**ภายในไฟล์ตัวเอง
+> - `file1.csv`: `a` (A001..A010), `b` (B001..B010), `c` (C001..C010) — unique ทุกตัว
+> - `file2.csv`: `key_a` (A001..A009), `key_b` (B001..B009), `key_c` (C001..C009) — unique ทุกตัว
+>
+> ทำให้สามารถใช้ key เดียว (เช่น `a` ↔ `key_a`) ก็ match แถวได้ถูกต้อง
+
+### `file1.csv` (ไฟล์หลัก) - 10 แถว, 8 คอลัมน์
+```
+a, b, c, customer_name, score, grade, status, comment
+```
+
+### `file2.csv` (ไฟล์แก้ไข) - 9 แถว, 9 คอลัมน์ (ขาดแถว A010 เพื่อทดสอบ FALSE)
+```
+key_a, key_b, extra_inserted_1, key_c, reviewer, new_score, extra_inserted_2, new_grade, new_status
+```
+
+---
+
+## ทดสอบ Mode 1: **Replace**
+
+1. เปิด http://localhost:3000/csv-merge
+2. อัปโหลด `file1.csv` → ไฟล์ 1, `file2.csv` → ไฟล์ 2
+3. เลือก **Output Mode = Replace**
+4. ตั้งค่า mapping:
+
+| File 1 (Target) | File 2 (Source) | Is Key? |
+| --------------- | --------------- | ------- |
+| a               | key_a           | ✅      |
+| b               | key_b           | ✅      |
+| c               | key_c           | ✅      |
+| score           | new_score       | ❌      |
+| grade           | new_grade       | ❌      |
+| status          | new_status      | ❌      |
+
+5. กด **Merge + Export Excel**
+
+**ผลที่คาดหวัง** - ชีต Merged คอลัมน์: `a, b, c, customer_name, score, grade, status, comment, VALIDATION`
+- 🟢 เขียว: cell ที่ค่าเปลี่ยนจาก file 1 และตรงกับ file 2
+- 🔴 แดง: cell ที่ค่าไม่เปลี่ยน หรือ key ไม่ match
+- VALIDATION = FALSE สำหรับแถว C010 (ไม่มีใน file 2)
+
+---
+
+## ทดสอบ Mode 2: **Insert After**
+
+1. เลือก **Output Mode = Insert After**
+2. ตั้งค่า mapping — แยก **Key** (สำหรับ match) ออกจาก **Insert** (คอลัมน์ที่จะแทรกหลัง F1 col ที่ระบุ):
+
+| File 1 (Target / Anchor) | File 2 (Source)  | Is Key? | ความหมาย                                    |
+| ------------------------ | ---------------- | ------- | -------------------------------------------- |
+| a                        | key_a            | ✅      | Key สำหรับ match                            |
+| b                        | key_b            | ✅      | Key สำหรับ match                            |
+| c                        | key_c            | ✅      | Key สำหรับ match                            |
+| c                        | reviewer         | ❌      | Insert คอลัมน์ `reviewer` หลัง `c`          |
+| c                        | extra_inserted_1 | ❌      | Insert คอลัมน์ `extra_inserted_1` หลัง `c`  |
+| score                    | new_score        | ❌      | Insert คอลัมน์ `new_score` หลัง `score`     |
+| grade                    | new_grade        | ❌      | Insert คอลัมน์ `new_grade` หลัง `grade`     |
+
+3. กด **Merge + Export Excel**
+
+**ผลที่คาดหวัง** - ชีต Merged คอลัมน์:
+```
+a, b, c, [reviewer, extra_inserted_1], customer_name,
+score, [new_score], grade, [new_grade],
+status, comment, VALIDATION
+```
+
+- 🟧 ส้ม: คอลัมน์ที่ insert (ตามตำแหน่งที่ระบุใน F1 anchor)
+- VALIDATION = FALSE สำหรับแถว C010 → คอลัมน์ insert เป็นค่าว่าง

@@ -1,0 +1,350 @@
+:root {
+  /* Brand green (modern + BAAC-like mood) */
+  --accent: #0f9d58;
+  /* brand green */
+  --accent-2: #0a7f47;
+  /* hover/darker */
+  --accent-soft: rgba(15, 157, 88, 0.12);
+
+  /* Light surfaces */
+  --bg: #f5faf7;
+  /* page background */
+  --card: #ffffff;
+  /* card surface */
+  --text: #0f172a;
+  /* slate-900 */
+  --muted: #475569;
+  /* slate-600 */
+  --border: rgba(15, 23, 42, 0.12);
+
+  /* Utility */
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 16px 36px rgba(2, 6, 23, 0.08);
+  --radius: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+
+  /* Brighter, modern background */
+  background:
+    radial-gradient(900px 520px at 18% 6%, rgba(15, 157, 88, 0.18) 0%, rgba(15, 157, 88, 0) 60%),
+    radial-gradient(700px 420px at 85% 18%, rgba(34, 197, 94, 0.14) 0%, rgba(34, 197, 94, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, var(--bg) 100%);
+  color: var(--text);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Navigation */
+.navigation {
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.10);
+  padding: 14px 0;
+  margin-bottom: 22px;
+  backdrop-filter: blur(10px);
+}
+
+.nav-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.nav-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.nav-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: rgba(15, 157, 88, 0.08);
+  border-color: rgba(15, 157, 88, 0.20);
+  text-decoration: none;
+}
+
+.nav-link.active {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 18px rgba(15, 157, 88, 0.18);
+}
+
+/* Main content */
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 18px 60px;
+}
+
+h1 {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+}
+
+p {
+  color: var(--muted);
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+
+code {
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+/* Grid & Cards */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 860px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.cardTitle {
+  font-weight: 900;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.small {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Forms */
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+input,
+select {
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+input::placeholder {
+  color: rgba(71, 85, 105, 0.7);
+}
+
+select option {
+  color: #0f172a;
+  background-color: #fff;
+}
+
+input[type="file"] {
+  padding: 9px 10px;
+}
+
+input:hover,
+select:hover {
+  border-color: rgba(15, 157, 88, 0.28);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(15, 157, 88, 0.55);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* Buttons */
+.btn,
+button {
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: #ffffff;
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  font-size: 14px;
+  transition: transform 0.05s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.btn:hover,
+button:hover {
+  background: rgba(15, 157, 88, 0.08);
+  border-color: rgba(15, 157, 88, 0.25);
+}
+
+.btn:active,
+button:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled,
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Optional: primary button helper (ถ้าคุณอยากใช้ class เพิ่ม) */
+.btnPrimary {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(15, 157, 88, 0.18);
+}
+
+.btnPrimary:hover {
+  filter: brightness(0.98);
+}
+
+/* Pre & Code blocks */
+.pre,
+pre {
+  white-space: pre-wrap;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 14px;
+  padding: 12px;
+  margin-top: 12px;
+  color: #0f172a;
+  overflow: auto;
+}
+
+/* Tables */
+.tableWrap {
+  margin-top: 12px;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 900px;
+}
+
+th,
+td {
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  text-align: left;
+  font-size: 13px;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  z-index: 1;
+  font-weight: 900;
+  color: #0f172a;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.10);
+}
+
+/* Zebra + hover row */
+tbody tr:nth-child(even) td {
+  background: rgba(15, 157, 88, 0.03);
+}
+
+tbody tr:hover td {
+  background: rgba(15, 157, 88, 0.07);
+}
+
+/* Utility */
+ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+li {
+  margin: 4px 0;
+}
+
+b {
+  color: var(--text);
+}
+
+/* Nice selection */
+::selection {
+  background: rgba(15, 157, 88, 0.22);
+}

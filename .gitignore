@@ -1,0 +1,8 @@
+node_modules
+.next
+.env.local
+exports
+.DS_Store
+*.tsbuildinfo
+deploy-package/*
+!deploy-package/.gitkeep
