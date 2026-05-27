@@ -49,6 +49,62 @@ key_a, key_b, extra_inserted_1, key_c, reviewer, new_score, extra_inserted_2, ne
 
 ---
 
+### 🆕 Conditional Replace (per-row, เฉพาะ Replace mode)
+
+ใช้ **`file2_conditional.csv`** (ใหม่) คู่กับ `file1.csv` เดิม
+
+**กลไก**: แต่ละ replace row มีช่อง **Cond?** (checkbox) — ถ้าติ๊ก จะมีช่อง **Cond Col (F2)** + **When = ?** ให้ตั้งเงื่อนไขเฉพาะแถวนั้น (rule นั้น) เท่านั้น Rule ที่ไม่ติ๊ก = catch-all (apply เสมอเมื่อมาถึง). ถ้ามีหลาย rules ต่อ F1 col → first match wins.
+
+#### โครงสร้าง `file2_conditional.csv` (9 แถว, 9 คอลัมน์)
+```
+key_a, key_b, key_c, customer_tier, score_premium, score_standard, score_basic, grade_final, status_final
+```
+
+- `customer_tier` มี 3 ค่า: **PREMIUM, STANDARD, BASIC**
+- `score_*` มี 3 คอลัมน์ (ค่าต่างกันตาม tier) — ทดสอบ **conditional replace ที่ target เดียว (`score`) มีหลาย rule**
+- `grade_final`, `status_final` — ทดสอบ **fallback rule** (replace ทุกแถวไม่มีเงื่อนไข)
+
+#### ขั้นตอนทดสอบ
+
+1. เลือก **Output Mode = Replace**
+2. อัปโหลด `file1.csv` → ไฟล์ 1, `file2_conditional.csv` → ไฟล์ 2
+3. ตั้ง mapping (ใช้ checkbox **Cond?** ในแต่ละ row ที่ต้องการเงื่อนไข):
+
+| File 1 | File 2          | Is Key? | Cond? | Cond Col (F2)   | When = ?    |
+| ------ | --------------- | ------- | ----- | --------------- | ----------- |
+| a      | key_a           | ✅      | —     | —               | —           |
+| b      | key_b           | ✅      | —     | —               | —           |
+| c      | key_c           | ✅      | —     | —               | —           |
+| score  | score_premium   |         | ✅    | `customer_tier` | `PREMIUM`   |
+| score  | score_standard  |         | ✅    | `customer_tier` | `STANDARD`  |
+| score  | score_basic     |         | ✅    | `customer_tier` | `BASIC`     |
+| grade  | grade_final     |         | ❌    | —               | —           |
+| status | status_final    |         | ❌    | —               | —           |
+
+5. Merge + Export
+
+#### ผลที่คาดหวัง
+
+| แถว  | tier     | score (file1→merged) | grade  | status   | สีในเซลล์ score |
+| ---- | -------- | -------------------- | ------ | -------- | ---------------- |
+| A001 | PREMIUM  | 75 → **95**          | B → A  | APPROVED | 🟢 เขียว         |
+| A002 | PREMIUM  | 82 → **92**          | A → A  | APPROVED | 🟢 เขียว         |
+| A003 | STANDARD | 65 → **68**          | C → B  | PENDING → APPROVED | 🟢 เขียว |
+| A004 | STANDARD | 70 → **70** (เท่าเดิม) | B → B | APPROVED | 🟢 เขียว         |
+| A005 | BASIC    | 55 → **50**          | D → C  | REJECTED → PENDING | 🟢 เขียว |
+| A006 | PREMIUM  | 88 → **98**          | A → A  | APPROVED | 🟢 เขียว         |
+| A007 | STANDARD | 72 → **75**          | B → B  | PENDING → APPROVED | 🟢 เขียว |
+| A008 | BASIC    | 60 → **52**          | C → C  | PENDING  | 🟢 เขียว         |
+| A009 | STANDARD | 78 → **73**          | B → B  | APPROVED | 🟢 เขียว         |
+| A010 | (ไม่มี) | 90 (คงเดิม)           | A      | APPROVED | ⚪ ไม่ลงสี + VALIDATION=**FALSE** |
+
+#### ทดสอบ "ไม่มี rule match + ไม่มี fallback"
+
+ลองลบ rule fallback ของ `grade` ออก แล้ว replace เฉพาะตอน `tier=PREMIUM`:
+- แถว STANDARD/BASIC → grade คงค่าเดิมจาก file 1 + **ไม่ลงสี**
+
+---
+
 ## ทดสอบ Mode 2: **Insert After**
 
 1. เลือก **Output Mode = Insert After**

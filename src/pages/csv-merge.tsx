@@ -8,8 +8,21 @@ import Navigation from '../components/Navigation';
 type Row = Record<string, any>;
 type ColumnMapping = Record<string, string>; // file2Col -> file1Col
 
-const STORAGE_KEY_MAP_ROWS = 'csv-merge-generic-mapping-rows';
+// Mapping rows are stored per Category (e.g. 'csv-merge-mapping-Agri', 'csv-merge-mapping-500').
+// Both consumer (cust_desc) and corporate (cust_type) categories share the same key namespace
+// since their values don't collide (Agri/Fishery/Livestock/Comsumer vs 500/707/708/...).
+const STORAGE_KEY_PREFIX = 'csv-merge-mapping-';
+// Legacy single-key store, migrated into the 'Agri' category on first load.
+const OLD_STORAGE_KEY = 'csv-merge-generic-mapping-rows';
 const STORAGE_KEY_OUTPUT_MODE = 'csv-merge-output-mode';
+
+type SqlVariant = 'consumer' | 'corporate';
+const CONSUMER_CATEGORIES = ['Agri', 'Fishery', 'Livestock', 'Comsumer', 'NonAgri'];
+const CORPORATE_CATEGORIES = ['500', '707', '708', '709', '710', '711'];
+
+function getCategoriesByVariant(variant: SqlVariant): string[] {
+    return variant === 'consumer' ? CONSUMER_CATEGORIES : CORPORATE_CATEGORIES;
+}
 
 type OutputMode = 'replace' | 'insert';
 
@@ -18,6 +31,14 @@ type MappingRow = {
     f1Col: string;
     f2Col: string;
     isKey: boolean;
+    // Per-row Conditional Replace (Replace mode, non-key rows only):
+    // when isConditional && conditionCol && conditionWhen are all set, this rule applies only
+    // to F2 rows where row[conditionCol] === conditionWhen. Otherwise the rule is unconditional.
+    // Multiple rules per f1Col are evaluated in declared order: first match wins; the first
+    // unconditional rule reached acts as a catch-all.
+    isConditional?: boolean;
+    conditionCol?: string;
+    conditionWhen?: string;
 };
 
 function norm(v: any) {
@@ -54,23 +75,38 @@ function downloadArrayBuffer(buf: ArrayBuffer, filename: string) {
     URL.revokeObjectURL(url);
 }
 
-function loadSavedMappingRows(): MappingRow[] {
+function normalizeMappingRows(arr: any[]): MappingRow[] {
+    return arr.map((r: any): MappingRow => {
+        const base = {
+            id: r.id,
+            f1Col: r.f1Col ?? '',
+            f2Col: r.f2Col ?? '',
+            isConditional: !!r.isConditional,
+            conditionCol: r.conditionCol ?? '',
+            conditionWhen: r.conditionWhen ?? '',
+        };
+        if (typeof r.isKey === 'boolean') return { ...base, isKey: r.isKey };
+        return { ...base, isKey: r.mode === 'key' };
+    });
+}
+
+function loadSavedMappingRows(category: string): MappingRow[] {
     if (typeof window === 'undefined') return [];
     try {
-        const saved = localStorage.getItem(STORAGE_KEY_MAP_ROWS);
-        if (!saved) return [];
-        const arr = JSON.parse(saved);
-        return arr.map((r: any): MappingRow => {
-            if (typeof r.isKey === 'boolean') {
-                return { id: r.id, f1Col: r.f1Col ?? '', f2Col: r.f2Col ?? '', isKey: r.isKey };
+        const key = STORAGE_KEY_PREFIX + category;
+        const saved = localStorage.getItem(key);
+        if (saved) return normalizeMappingRows(JSON.parse(saved));
+
+        // Migration: the legacy single-key store maps to the 'Agri' category.
+        if (category === 'Agri') {
+            const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
+            if (oldSaved) {
+                localStorage.setItem(key, oldSaved);
+                localStorage.removeItem(OLD_STORAGE_KEY);
+                return normalizeMappingRows(JSON.parse(oldSaved));
             }
-            return {
-                id: r.id,
-                f1Col: r.f1Col ?? '',
-                f2Col: r.f2Col ?? '',
-                isKey: r.mode === 'key',
-            };
-        });
+        }
+        return [];
     } catch {
         return [];
     }
@@ -86,11 +122,51 @@ function loadSavedOutputMode(): OutputMode {
     }
 }
 
-function saveMappingRows(rows: MappingRow[]) {
+function saveMappingRows(category: string, rows: MappingRow[]) {
     if (typeof window === 'undefined') return;
     try {
-        localStorage.setItem(STORAGE_KEY_MAP_ROWS, JSON.stringify(rows));
+        localStorage.setItem(STORAGE_KEY_PREFIX + category, JSON.stringify(rows));
     } catch { }
+}
+
+function exportAllMappings(): string {
+    const mappings: Record<string, MappingRow[]> = {};
+    if (typeof window !== 'undefined') {
+        const allCategories = [...CONSUMER_CATEGORIES, ...CORPORATE_CATEGORIES];
+        allCategories.forEach(cat => {
+            const saved = localStorage.getItem(STORAGE_KEY_PREFIX + cat);
+            if (saved) {
+                try {
+                    mappings[cat] = JSON.parse(saved);
+                } catch { }
+            }
+        });
+    }
+    return JSON.stringify({
+        version: '1.0',
+        exportDate: new Date().toISOString(),
+        mappings,
+    }, null, 2);
+}
+
+function importMappings(jsonData: string): { success: boolean; message: string } {
+    if (typeof window === 'undefined') return { success: false, message: 'Not in browser' };
+    try {
+        const data = JSON.parse(jsonData);
+        if (!data.mappings || typeof data.mappings !== 'object') {
+            return { success: false, message: 'Invalid file format' };
+        }
+        let count = 0;
+        Object.entries(data.mappings).forEach(([category, rows]) => {
+            if (Array.isArray(rows)) {
+                localStorage.setItem(STORAGE_KEY_PREFIX + category, JSON.stringify(rows));
+                count++;
+            }
+        });
+        return { success: true, message: `Imported ${count} category mappings` };
+    } catch (e: any) {
+        return { success: false, message: e?.message || 'Import failed' };
+    }
 }
 
 export default function CsvMergePage() {
@@ -107,12 +183,27 @@ export default function CsvMergePage() {
     const [cols2, setCols2] = useState<string[]>([]);
     const [mappingRows, setMappingRows] = useState<MappingRow[]>([]);
     const [outputMode, setOutputMode] = useState<OutputMode>('replace');
+    const [variant, setVariant] = useState<SqlVariant>('consumer');
+    const [category, setCategory] = useState<string>('Agri');
 
-    // Load saved data on mount
+    // Switching variant resets the selected category to that variant's first option
+    const handleVariantChange = (next: SqlVariant) => {
+        setVariant(next);
+        const defaults = getCategoriesByVariant(next);
+        setCategory(defaults[0]);
+    };
+
+    const variantLabel = variant === 'consumer' ? 'รายย่อย' : 'นิติบุคคล';
+
+    // Load output mode on mount
     useEffect(() => {
-        setMappingRows(loadSavedMappingRows());
         setOutputMode(loadSavedOutputMode());
     }, []);
+
+    // Load saved mapping rows on mount and whenever the Category changes
+    useEffect(() => {
+        setMappingRows(loadSavedMappingRows(category));
+    }, [category]);
 
     const updateOutputMode = (mode: OutputMode) => {
         setOutputMode(mode);
@@ -151,19 +242,52 @@ export default function CsvMergePage() {
     const addMappingRow = () => {
         const next: MappingRow[] = [...mappingRows, { id: crypto.randomUUID(), f1Col: '', f2Col: '', isKey: false }];
         setMappingRows(next);
-        saveMappingRows(next);
+        saveMappingRows(category, next);
     };
 
     const removeMappingRow = (id: string) => {
         const next = mappingRows.filter(r => r.id !== id);
         setMappingRows(next);
-        saveMappingRows(next);
+        saveMappingRows(category, next);
     };
 
     const updateMappingRow = (id: string, updates: Partial<MappingRow>) => {
         const next = mappingRows.map(r => r.id === id ? { ...r, ...updates } : r);
         setMappingRows(next);
-        saveMappingRows(next);
+        saveMappingRows(category, next);
+    };
+
+    const handleExportMappings = () => {
+        const json = exportAllMappings();
+        const now = new Date();
+        const yyyymmdd = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0');
+        const filename = `csv-merge-mappings-${yyyymmdd}.json`;
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        setLog(`✅ Exported all mappings to ${filename}`);
+    };
+
+    const handleImportMappings = async (file: File) => {
+        try {
+            const text = await file.text();
+            const result = importMappings(text);
+            if (result.success) {
+                setLog(`✅ ${result.message}`);
+                // Reload the currently selected category
+                setMappingRows(loadSavedMappingRows(category));
+            } else {
+                setLog(`❌ ${result.message}`);
+            }
+        } catch (e: any) {
+            setLog(`❌ Error: ${e?.message ?? String(e)}`);
+        }
     };
 
     const canRun = useMemo(() => {
@@ -190,6 +314,20 @@ export default function CsvMergePage() {
         // Insert mode: non-keys are insert mappings (f1Col = anchor, f2Col = source to insert).
         const updates = outputMode === 'replace' ? nonKeys : [];
         const inserts = outputMode === 'insert' ? nonKeys : [];
+
+        // Conditional Replace: each replace row may be conditional (per-row). Group by f1Col so
+        // we can pick the first matching rule (conditional rules check their own col+value;
+        // unconditional rules act as catch-all). If grouping yields multiple rules per f1Col,
+        // we evaluate in declared order.
+        const hasConditionalUpdate = outputMode === 'replace' && updates.some(u => u.isConditional && u.conditionCol);
+        const replaceRulesByF1 = new Map<string, MappingRow[]>();
+        if (hasConditionalUpdate) {
+            for (const u of updates) {
+                const arr = replaceRulesByF1.get(u.f1Col) ?? [];
+                arr.push(u);
+                replaceRulesByF1.set(u.f1Col, arr);
+            }
+        }
 
         if (!file1 || !file2 || keys.length === 0) return;
 
@@ -233,13 +371,41 @@ export default function CsvMergePage() {
             }
         }
 
+        // Track which F1 cols got actually resolved per F2 row (used for VALIDATION + coloring).
+        // If conditional replace doesn't match any rule for a given F1 col, that col is omitted
+        // from mappedRow → in the Merged sheet the cell keeps File 1 value, no coloring, no
+        // VALIDATION check for that cell on that row.
         const mappedRows2 = rows2.map(row => {
             const mappedRow: Row = {};
             for (const k of keys) {
                 mappedRow[k.f1Col] = row[k.f2Col];
             }
-            for (const u of updates) {
-                mappedRow[u.f1Col] = row[u.f2Col];
+            if (hasConditionalUpdate) {
+                // Per-row Conditional Replace: each f1Col evaluates rules in declared order.
+                // First match wins. A rule "matches" if it is unconditional (acts as catch-all)
+                // or if its conditionCol/conditionWhen evaluates true on this F2 row.
+                for (const [f1Col, rules] of replaceRulesByF1) {
+                    let matched: MappingRow | undefined;
+                    for (const r of rules) {
+                        const conditional = r.isConditional && r.conditionCol;
+                        if (!conditional) {
+                            matched = r;
+                            break;
+                        }
+                        const cellVal = norm(row[r.conditionCol!]);
+                        if (norm(r.conditionWhen ?? '') === cellVal) {
+                            matched = r;
+                            break;
+                        }
+                    }
+                    if (matched) mappedRow[f1Col] = row[matched.f2Col];
+                }
+            } else {
+                // No conditional rules anywhere: simple unconditional replace (later rules for
+                // the same f1Col overwrite earlier ones, matching prior behavior).
+                for (const u of updates) {
+                    mappedRow[u.f1Col] = row[u.f2Col];
+                }
             }
             for (const ins of insertOutputs) {
                 mappedRow[ins.newName] = row[ins.f2Col];
@@ -256,20 +422,30 @@ export default function CsvMergePage() {
         setLog(`Merging (${outputMode})... keys: ${keyColsF1.join(', ')}${outputMode === 'replace' ? `, replaceCols: ${replaceColsF1.join(', ') || '(none)'}` : `, insertCols: ${insertOutputs.map(i => i.newName).join(', ') || '(none)'}`}`);
 
         const rows3: Row[] = [];
+        // Per-row replaced col tracking: only cells actually replaced (rule matched) get
+        // colored AND validated. Cells that kept File 1 value are skipped.
+        const replacedColsByRow: string[][] = [];
         for (const r1 of rows1) {
             const key = makeKey(r1, keyColsF1);
             const r2 = index2.get(key);
             const merged = { ...r1 };
+            const replacedHere: string[] = [];
 
             let isValid = !!r2;
             if (r2) {
-                for (const colF1 of replaceColsF1) merged[colF1] = r2[colF1];
+                for (const colF1 of replaceColsF1) {
+                    if (Object.prototype.hasOwnProperty.call(r2, colF1)) {
+                        merged[colF1] = r2[colF1];
+                        replacedHere.push(colF1);
+                    }
+                }
                 for (const ins of insertOutputs) merged[ins.newName] = r2[ins.newName] ?? '';
             } else {
                 for (const ins of insertOutputs) merged[ins.newName] = '';
             }
             merged['VALIDATION'] = isValid ? 'TRUE' : 'FALSE';
             rows3.push(merged);
+            replacedColsByRow.push(replacedHere);
         }
 
         // Build merged columns: F1 cols, with each insert col placed right after its anchor
@@ -340,13 +516,17 @@ export default function CsvMergePage() {
             return parts.length === 1 ? parts[0] : parts.join('&"||"&');
         };
 
-        const validatedCols = [...replaceColsF1, ...insertOutputs.map(i => i.newName)];
         const insertColToF2 = new Map(insertOutputs.map(i => [i.newName, i.f2Col]));
         // _COMP_KEY column letter in File2 (Original) — appended after all original cols in insert mode
         const origCompKeyLetter = XLSX.utils.encode_col(actualCols2.length);
 
         rows3.forEach((row, i) => {
             const excelRowIdx = i + 2;
+            // Per-row validated cols: replace cols only count if they were actually replaced
+            // for this specific row (conditional rule matched). Insert cols always validated.
+            const replacedHere = replacedColsByRow[i] ?? [];
+            const validatedColsForRow = [...replacedHere, ...insertOutputs.map(ins => ins.newName)];
+
             const rowData = mergedCols.map(col => {
                 const val = row[col] ?? '';
                 if (col === 'VALIDATION') {
@@ -355,12 +535,10 @@ export default function CsvMergePage() {
 
                     if (outputMode === 'insert') {
                         // Insert mode: validate against File2 (Original) directly.
-                        // 1) Key must exist in File2 (Original)._COMP_KEY → keys match
                         conditions.push(
                             `IFERROR(MATCH(${keyFrag}, 'File2 (Original)'!$${origCompKeyLetter}$2:$${origCompKeyLetter}$99999, 0)>0, FALSE)`
                         );
-                        // 2) Each highlighted (insert) cell must equal the value at that row in File2 (Original)
-                        for (const c of validatedCols) {
+                        for (const c of validatedColsForRow) {
                             const targetColIdx = mergedCols.indexOf(c);
                             const targetColLetter = XLSX.utils.encode_col(targetColIdx);
                             const f2Col = insertColToF2.get(c);
@@ -373,8 +551,8 @@ export default function CsvMergePage() {
                             );
                         }
                     } else {
-                        // Replace mode: existing VLOOKUP into File2 (Mapped)
-                        for (const c of validatedCols) {
+                        // Replace mode: VLOOKUP into File2 (Mapped); only check cells actually replaced this row
+                        for (const c of validatedColsForRow) {
                             const targetColIdx = mergedCols.indexOf(c);
                             const targetColLetter = XLSX.utils.encode_col(targetColIdx);
                             const vlookupIndex = mappedSheetCols.indexOf(c) + 2;
@@ -410,9 +588,12 @@ export default function CsvMergePage() {
             const rIdx = i + 1; // row index in sheet (0-based)
             const r2 = index2.get(makeKey(rows1[i], keyColsF1));
             const isValid = r['VALIDATION'] === 'TRUE';
+            const replacedHere = new Set(replacedColsByRow[i] ?? []);
 
-            // Color replacement columns: GREEN if changed from F1 to match F2, RED otherwise
+            // Color replacement columns: only cells that were actually replaced for this row.
+            // Cells not replaced (no rule matched in conditional mode) keep File 1 value → no color.
             replaceColsF1.forEach(col => {
+                if (!replacedHere.has(col)) return;
                 const cIdx = mergedCols.indexOf(col);
                 if (cIdx === -1) return;
                 const addr = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
@@ -438,7 +619,7 @@ export default function CsvMergePage() {
         const yyyymmdd = now.getFullYear().toString() +
             (now.getMonth() + 1).toString().padStart(2, '0') +
             now.getDate().toString().padStart(2, '0');
-        const filename = `รายงานผลการประเมิน_CreditScoring_รายย่อย_Agri_manual_${yyyymmdd}.xlsx`;
+        const filename = `รายงานผลการประเมิน_CreditScoring_${variantLabel}_${category}_manual_${yyyymmdd}.xlsx`;
 
         downloadArrayBuffer(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), filename);
         setLog('Done ✅');
@@ -454,6 +635,56 @@ export default function CsvMergePage() {
                     เลือก <b>ไฟล์ 1</b> (ข้อมูลหลัก) และ <b>ไฟล์ 2</b> (ข้อมูลทับ/แก้ไข) จากนั้น map คอลัมน์ระหว่างไฟล์ และเลือกคอลัมน์คีย์
                     แล้ว export
                 </p>
+
+                <div className="card" style={{ marginTop: 12 }}>
+                    <div className="cardTitle">Category &amp; Mapping Management</div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ flex: '0 0 220px' }}>
+                            <div className="small" style={{ marginBottom: 4 }}>SQL Variant</div>
+                            <select
+                                value={variant}
+                                onChange={(e) => handleVariantChange(e.target.value as SqlVariant)}
+                                style={{ width: '100%', padding: '8px' }}
+                            >
+                                <option value="consumer">Consumer (รายย่อย)</option>
+                                <option value="corporate">Corporate (นิติบุคคล)</option>
+                            </select>
+                        </div>
+                        <div style={{ flex: '0 0 200px' }}>
+                            <div className="small" style={{ marginBottom: 4 }}>
+                                {variant === 'consumer' ? 'Category (cust_desc)' : 'Category (cust_type)'}
+                            </div>
+                            <select
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value)}
+                                style={{ width: '100%', padding: '8px' }}
+                            >
+                                {getCategoriesByVariant(variant).map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                        <div style={{ flex: '1', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                            <button className="btn btnSecondary" onClick={handleExportMappings}>
+                                📤 Export All Mappings
+                            </button>
+                            <label className="btn btnSecondary" style={{ margin: 0, cursor: 'pointer' }}>
+                                📥 Import Mappings
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleImportMappings(file);
+                                        e.target.value = '';
+                                    }}
+                                />
+                            </label>
+                        </div>
+                    </div>
+                    <div className="small" style={{ marginTop: 8 }}>
+                        Mapping configuration จะถูกบันทึกแยกตาม Category • Export เพื่อสำรองหรือย้ายเครื่อง
+                    </div>
+                </div>
 
                 <div className="grid">
                     <div className="card">
@@ -539,6 +770,13 @@ export default function CsvMergePage() {
                             Mapping Configuration
                             <button className="btn btnSecondary" style={{ float: 'right', padding: '4px 10px', fontSize: '12px' }} onClick={addMappingRow}>+ Add Row</button>
                         </div>
+
+                        {outputMode === 'replace' && (
+                            <div className="small" style={{ marginTop: 8, color: 'var(--muted)' }}>
+                                💡 ติ๊ก <b>Cond?</b> ในแต่ละ replace row ที่ต้องการเงื่อนไข แล้วเลือก F2 col + ค่าที่ต้องตรง — ถ้ามีหลาย rules ต่อ F1 col เดียวกัน ระบบจะใช้ rule แรกที่ match (rule ที่ไม่ติ๊ก = catch-all)
+                            </div>
+                        )}
+
                         <div style={{ marginTop: 12 }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
@@ -546,6 +784,13 @@ export default function CsvMergePage() {
                                         <th style={{ padding: 8 }}>{outputMode === 'insert' ? 'File 1 (Target / Anchor)' : 'File 1 (Target)'}</th>
                                         <th style={{ padding: 8 }}>{outputMode === 'insert' ? 'File 2 (Source / Start col)' : 'File 2 (Source)'}</th>
                                         <th style={{ padding: 8, textAlign: 'center' }}>Is Key?</th>
+                                        {outputMode === 'replace' && (
+                                            <>
+                                                <th style={{ padding: 8, textAlign: 'center' }}>Cond?</th>
+                                                <th style={{ padding: 8 }}>Cond Col (F2)</th>
+                                                <th style={{ padding: 8 }}>When = ?</th>
+                                            </>
+                                        )}
                                         <th style={{ padding: 8, textAlign: 'center' }}>Action</th>
                                     </tr>
                                 </thead>
@@ -579,6 +824,48 @@ export default function CsvMergePage() {
                                                     onChange={e => updateMappingRow(row.id, { isKey: e.target.checked })}
                                                 />
                                             </td>
+                                            {outputMode === 'replace' && (
+                                                <>
+                                                    <td style={{ padding: 4, textAlign: 'center' }}>
+                                                        {row.isKey ? (
+                                                            <span className="small" style={{ color: 'var(--muted)' }}>—</span>
+                                                        ) : (
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={!!row.isConditional}
+                                                                onChange={e => updateMappingRow(row.id, { isConditional: e.target.checked })}
+                                                            />
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: 4 }}>
+                                                        {row.isKey || !row.isConditional ? (
+                                                            <span className="small" style={{ color: 'var(--muted)' }}>—</span>
+                                                        ) : (
+                                                            <select
+                                                                value={row.conditionCol ?? ''}
+                                                                onChange={e => updateMappingRow(row.id, { conditionCol: e.target.value })}
+                                                                style={{ width: '100%' }}
+                                                            >
+                                                                <option value="">-- Select F2 Col --</option>
+                                                                {cols2.map(c => <option key={c} value={c}>{c}</option>)}
+                                                            </select>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: 4 }}>
+                                                        {row.isKey || !row.isConditional ? (
+                                                            <span className="small" style={{ color: 'var(--muted)' }}>—</span>
+                                                        ) : (
+                                                            <input
+                                                                type="text"
+                                                                value={row.conditionWhen ?? ''}
+                                                                onChange={e => updateMappingRow(row.id, { conditionWhen: e.target.value })}
+                                                                placeholder="(ค่าที่ต้องตรง)"
+                                                                style={{ width: '100%' }}
+                                                            />
+                                                        )}
+                                                    </td>
+                                                </>
+                                            )}
                                             <td style={{ padding: 4, textAlign: 'center' }}>
                                                 <button className="btn btnSecondary" style={{ padding: '4px 8px', color: '#ff6b6b' }} onClick={() => removeMappingRow(row.id)}>Remove</button>
                                             </td>
@@ -586,7 +873,7 @@ export default function CsvMergePage() {
                                     ))}
                                     {mappingRows.length === 0 && (
                                         <tr>
-                                            <td colSpan={4} style={{ padding: 20, textAlign: 'center', color: 'var(--muted)' }}>No mapping rows. Click "+ Add Row" to start.</td>
+                                            <td colSpan={outputMode === 'replace' ? 7 : 4} style={{ padding: 20, textAlign: 'center', color: 'var(--muted)' }}>No mapping rows. Click "+ Add Row" to start.</td>
                                         </tr>
                                     )}
                                 </tbody>

@@ -48,15 +48,22 @@ export default function ExcelToCsvPage() {
                 throw new Error('The "Merged" sheet is empty.');
             }
 
-            // Get all columns
+            // Get all columns and strip _1, _2, etc. suffixes (e.g. column_1 → column).
+            // This matches the header-normalization done by the CSV Merge exporter.
             const allColumns = Object.keys(jsonData[0]);
+            const cleanedColumns = allColumns.map(col => col.replace(/_\d+$/, ''));
 
-            // Remove VALIDATION column
-            const filteredColumns = allColumns.filter(col => col !== 'VALIDATION');
+            // Remove VALIDATION column from the cleaned headers
+            const filteredColumns = cleanedColumns.filter(col => col !== 'VALIDATION');
+
+            // Rebuild rows using cleaned column names, sourcing values from the original keys
             const filteredData = jsonData.map(row => {
                 const newRow: Row = {};
-                filteredColumns.forEach(col => {
-                    newRow[col] = row[col];
+                allColumns.forEach((originalCol, index) => {
+                    const cleanCol = cleanedColumns[index];
+                    if (cleanCol !== 'VALIDATION') {
+                        newRow[cleanCol] = row[originalCol];
+                    }
                 });
                 return newRow;
             });
